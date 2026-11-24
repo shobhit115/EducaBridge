@@ -48,8 +48,12 @@ function AuthCard() {
 
   // OTP Verification States
   const [otpStep, setOtpStep] = useState(false);
-  const [pendingEmail, setPendingEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
+
+  // Admin 2FA OTP Verification States
+  const [adminOtpStep, setAdminOtpStep] = useState(false);
+  const [adminEmailPending, setAdminEmailPending] = useState("");
+  const [adminOtpCode, setAdminOtpCode] = useState("");
 
   const resetFeedback = () => {
     setErrorMsg(null);
@@ -60,19 +64,57 @@ function AuthCard() {
     setUserSelectedMode(nextMode);
     setOtpStep(false);
     setOtpCode("");
+    setAdminOtpStep(false);
+    setAdminOtpCode("");
     resetFeedback();
   };
 
   // =========================================================================
-  // 1. SIGN IN HANDLER (Supabase Auth + Role-Based Dashboard Redirect)
+  // 1. SIGN IN HANDLER (Admin 2FA Verification OR Student Supabase Auth)
   // =========================================================================
   const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     resetFeedback();
     setLoading(true);
 
+    const normalizedEmail = signInEmail.trim().toLowerCase();
+
+    // 1A. Check if this is the configured Administrator account
+    try {
+      const adminRes = await fetch("/api/auth/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: signInPassword,
+        }),
+      });
+
+      const adminData = await adminRes.json();
+
+      if (adminRes.ok && adminData.requireOtp) {
+        setLoading(false);
+        setAdminOtpStep(true);
+        setAdminEmailPending(normalizedEmail);
+        setInfoMsg(
+          adminData.message ||
+            `Security verification code sent to ${normalizedEmail}.`
+        );
+        return;
+      }
+
+      if (!adminRes.ok && !adminData.isStudent) {
+        setLoading(false);
+        setErrorMsg(adminData.error || "Invalid credentials.");
+        return;
+      }
+    } catch (adminErr) {
+      console.error("Admin login check error:", adminErr);
+    }
+
+    // 1B. Student Supabase Auth login
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: signInEmail.trim().toLowerCase(),
+      email: normalizedEmail,
       password: signInPassword,
     });
 
@@ -82,7 +124,7 @@ function AuthCard() {
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", data.user.id)
@@ -90,19 +132,76 @@ function AuthCard() {
 
     setLoading(false);
 
-    if (profileError || !profile) {
-      setErrorMsg("Unable to load account permissions. Please contact support.");
-      return;
-    }
-
-    if (profile.role === "admin") {
+    if (profile?.role === "admin") {
       router.push("/admin/dashboard");
-    } else if (profile.role === "teacher") {
+    } else if (profile?.role === "teacher") {
       router.push("/teacher/dashboard");
     } else {
       router.push("/student/dashboard");
     }
     router.refresh();
+  };
+
+  // =========================================================================
+  // 1C. ADMIN 2FA OTP VERIFICATION HANDLER
+  // =========================================================================
+  const handleVerifyAdminOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    resetFeedback();
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/admin-verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: adminEmailPending,
+          otp: adminOtpCode.trim(),
+        }),
+      });
+
+      const result = await res.json();
+      setLoading(false);
+
+      if (!res.ok) {
+        setErrorMsg(result.error || "Invalid verification code.");
+        return;
+      }
+
+      router.push("/admin/dashboard");
+      router.refresh();
+    } catch {
+      setLoading(false);
+      setErrorMsg("Failed to complete admin verification. Please try again.");
+    }
+  };
+
+  const handleResendAdminOtp = async () => {
+    resetFeedback();
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: adminEmailPending,
+          password: signInPassword,
+        }),
+      });
+
+      const data = await res.json();
+      setLoading(false);
+
+      if (res.ok && data.requireOtp) {
+        setInfoMsg(`A fresh 6-digit code was sent to ${adminEmailPending}.`);
+      } else {
+        setErrorMsg("Unable to resend code. Please sign in again.");
+      }
+    } catch {
+      setLoading(false);
+      setErrorMsg("Network error. Please try again.");
+    }
   };
 
   // =========================================================================
@@ -169,7 +268,6 @@ function AuthCard() {
       setErrorMsg(result.error || "Invalid verification code.");
       return;
     }
-    setPendingEmail(normalizedEmail);
     setOtpStep(true);
     setInfoMsg(`We sent a 6-digit verification code to ${normalizedEmail}.`);
 
@@ -200,23 +298,27 @@ function AuthCard() {
           <Logo size="md" />
         </div>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-[#09265D] tracking-tight">
-          {otpStep
-            ? "Verify Your Email"
-            : mode === "signin"
-              ? "Welcome Back"
-              : "Join EducaBridge"}
+          {adminOtpStep
+            ? "Admin Security Check"
+            : otpStep
+              ? "Verify Your Email"
+              : mode === "signin"
+                ? "Welcome Back"
+                : "Join EducaBridge"}
         </h2>
         <p className="text-xs sm:text-sm text-slate-500">
-          {otpStep
-            ? "Enter the 6-digit OTP sent to your inbox to activate your account."
-            : mode === "signin"
-              ? "Sign in to access your student portal and live class links."
-              : "Create your student account to book a demo and start learning."}
+          {adminOtpStep
+            ? `Enter the 6-digit security code sent to ${adminEmailPending} to authorize admin access.`
+            : otpStep
+              ? "Enter the 6-digit OTP sent to your inbox to activate your account."
+              : mode === "signin"
+                ? "Sign in to access your student portal and live class links."
+                : "Create your student account to book a demo and start learning."}
         </p>
       </div>
 
       {/* Mode Switcher */}
-      {!otpStep && (
+      {!otpStep && !adminOtpStep && (
         <div className="grid grid-cols-2 p-1.5 bg-[#F2F6FF] rounded-2xl border border-blue-100">
           <button
             type="button"
@@ -262,7 +364,7 @@ function AuthCard() {
       {/* =========================================================================
           TAB 1: SIGN IN VIEW
           ========================================================================= */}
-      {mode === "signin" && !otpStep && (
+      {mode === "signin" && !otpStep && !adminOtpStep && (
         <>
           <form onSubmit={handleSignInSubmit} className="space-y-4">
             <div>
@@ -357,6 +459,89 @@ function AuthCard() {
             </button>
           </div>
         </>
+      )}
+
+      {/* =========================================================================
+          TAB 1B: ADMIN 2FA OTP VERIFICATION
+          ========================================================================= */}
+      {adminOtpStep && (
+        <form onSubmit={handleVerifyAdminOtp} className="space-y-4">
+          <div className="p-3.5 bg-blue-50/80 rounded-2xl border border-blue-100 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#09265D] text-white flex items-center justify-center shrink-0">
+              <KeyRound className="w-5 h-5 text-blue-200" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-[#09265D]">Administrator 2FA Required</p>
+              <p className="text-[11px] text-slate-500 truncate">{adminEmailPending}</p>
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="admin-otp-code"
+              className="block text-xs font-bold text-[#09265D] uppercase tracking-wider mb-1"
+            >
+              6-Digit Admin Verification Code
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                <KeyRound className="w-4 h-4" />
+              </div>
+              <input
+                id="admin-otp-code"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                required
+                autoFocus
+                value={adminOtpCode}
+                onChange={(e) => setAdminOtpCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-center font-mono text-xl tracking-[0.35em] text-[#09265D] font-bold focus:outline-none focus:ring-2 focus:ring-[#2458CC] focus:border-transparent transition-all"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || adminOtpCode.length !== 6}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#09265D] hover:bg-[#06193e] disabled:opacity-50 text-white font-bold text-sm shadow-md hover:shadow-lg transition-all active:scale-[0.98] cursor-pointer"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Authorizing Admin Access...</span>
+              </>
+            ) : (
+              <>
+                <span>Verify & Enter Admin Dashboard</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
+
+          <div className="flex items-center justify-between pt-2 text-xs text-slate-600">
+            <button
+              type="button"
+              onClick={() => {
+                setAdminOtpStep(false);
+                setAdminOtpCode("");
+                resetFeedback();
+              }}
+              className="hover:underline cursor-pointer"
+            >
+              &larr; Back to sign in
+            </button>
+            <button
+              type="button"
+              onClick={handleResendAdminOtp}
+              disabled={loading}
+              className="font-bold text-[#2458CC] hover:underline disabled:opacity-50 cursor-pointer"
+            >
+              Resend code
+            </button>
+          </div>
+        </form>
       )}
 
       {/* =========================================================================
