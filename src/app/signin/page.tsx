@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -54,6 +54,45 @@ function AuthCard() {
   const [adminOtpStep, setAdminOtpStep] = useState(false);
   const [adminEmailPending, setAdminEmailPending] = useState("");
   const [adminOtpCode, setAdminOtpCode] = useState("");
+
+  // ── Redirect if already logged in ──────────────────────────────────────
+  const [sessionChecked, setSessionChecked] = useState(false);
+
+  useEffect(() => {
+    async function checkExistingSessions() {
+      // 1. Check admin cookie session
+      try {
+        const adminRes = await fetch("/api/auth/admin-session");
+        const adminData = await adminRes.json();
+        if (adminRes.ok && adminData.authenticated) {
+          router.replace("/admin/dashboard");
+          return;
+        }
+      } catch { /* no admin session */ }
+
+      // 2. Check Supabase student/teacher session
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", user.id)
+            .single();
+
+          if (profile?.role === "teacher") {
+            router.replace("/teacher/dashboard");
+          } else {
+            router.replace("/student/dashboard");
+          }
+          return;
+        }
+      } catch { /* no supabase session */ }
+
+      setSessionChecked(true);
+    }
+    checkExistingSessions();
+  }, [router, supabase]);
 
   const resetFeedback = () => {
     setErrorMsg(null);
@@ -292,6 +331,14 @@ function AuthCard() {
 
   return (
     <div className="max-w-md w-full space-y-6 bg-white p-7 sm:p-9 rounded-3xl border border-slate-200/90 shadow-xl">
+      {/* Loading while checking session */}
+      {!sessionChecked ? (
+        <div className="py-12 text-center">
+          <div className="w-8 h-8 border-[3px] border-[#2458CC] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-slate-500">Checking session…</p>
+        </div>
+      ) : (
+      <>
       {/* Brand Header */}
       <div className="text-center space-y-2">
         <div className="flex justify-center mb-1">
@@ -797,6 +844,8 @@ function AuthCard() {
           <span>Need help with admissions? Contact us</span>
         </Link>
       </div>
+      </>
+      )}
     </div>
   );
 }
