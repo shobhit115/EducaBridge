@@ -19,6 +19,13 @@ export async function POST(request: Request) {
     const password = String(body.password || "");
     const otp = String(body.otp || "").trim();
 
+    if (!email) {
+      return NextResponse.json(
+        { error: "Email address is missing. Please go back and try again." },
+        { status: 400 }
+      );
+    }
+
     if (!/^\d{6}$/.test(otp)) {
       return NextResponse.json(
         { error: "Please enter a valid 6-digit verification code." },
@@ -35,14 +42,22 @@ export async function POST(request: Request) {
       .eq("email", email)
       .maybeSingle();
 
-    if (fetchError || !record) {
+    if (fetchError) {
+      console.error("OTP lookup error:", fetchError);
+      return NextResponse.json(
+        { error: `Database error: ${fetchError.message}` },
+        { status: 500 }
+      );
+    }
+
+    if (!record) {
       return NextResponse.json(
         { error: "No active verification request found. Please request a new code." },
         { status: 400 }
       );
     }
 
-    // 2. Check expiration and brute-force attempt limit
+    // 2. Check expiration and attempt limit
     if (new Date(record.expires_at).getTime() < Date.now()) {
       await supabaseAdmin.from("email_otps").delete().eq("email", email);
       return NextResponse.json(
@@ -78,9 +93,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 4. Consume OTP and create confirmed Supabase user (triggers public.profiles insert)
-    await supabaseAdmin.from("email_otps").delete().eq("email", email);
-
+    // 4. Create confirmed Supabase user FIRST (triggers public.profiles insert)
     const { error: createError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -93,11 +106,15 @@ export async function POST(request: Request) {
     });
 
     if (createError) {
+      console.error("Supabase createUser error:", createError);
       return NextResponse.json(
         { error: createError.message },
         { status: 400 }
       );
     }
+
+    // 5. Consume OTP only after user creation succeeds
+    await supabaseAdmin.from("email_otps").delete().eq("email", email);
 
     return NextResponse.json({ success: true });
   } catch (err) {

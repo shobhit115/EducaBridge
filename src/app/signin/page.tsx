@@ -48,6 +48,7 @@ function AuthCard() {
 
   // OTP Verification States
   const [otpStep, setOtpStep] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
 
   const resetFeedback = () => {
@@ -168,6 +169,9 @@ function AuthCard() {
       setErrorMsg(result.error || "Invalid verification code.");
       return;
     }
+    setPendingEmail(normalizedEmail);
+    setOtpStep(true);
+    setInfoMsg(`We sent a 6-digit verification code to ${normalizedEmail}.`);
 
     // Account is now created & verified; establish client session
     const { error: loginError } = await supabase.auth.signInWithPassword({
@@ -199,15 +203,15 @@ function AuthCard() {
           {otpStep
             ? "Verify Your Email"
             : mode === "signin"
-            ? "Welcome Back"
-            : "Join EducaBridge"}
+              ? "Welcome Back"
+              : "Join EducaBridge"}
         </h2>
         <p className="text-xs sm:text-sm text-slate-500">
           {otpStep
             ? "Enter the 6-digit OTP sent to your inbox to activate your account."
             : mode === "signin"
-            ? "Sign in to access your student portal and live class links."
-            : "Create your student account to book a demo and start learning."}
+              ? "Sign in to access your student portal and live class links."
+              : "Create your student account to book a demo and start learning."}
         </p>
       </div>
 
@@ -217,11 +221,10 @@ function AuthCard() {
           <button
             type="button"
             onClick={() => switchMode("signin")}
-            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-              mode === "signin"
+            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${mode === "signin"
                 ? "bg-white text-[#09265D] shadow-xs"
                 : "text-slate-600 hover:text-[#09265D]"
-            }`}
+              }`}
           >
             <LogIn className="w-4 h-4 text-[#2458CC]" />
             <span>Sign In</span>
@@ -230,11 +233,10 @@ function AuthCard() {
           <button
             type="button"
             onClick={() => switchMode("signup")}
-            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-              mode === "signup"
+            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${mode === "signup"
                 ? "bg-white text-[#09265D] shadow-xs"
                 : "text-slate-600 hover:text-[#09265D]"
-            }`}
+              }`}
           >
             <UserPlus className="w-4 h-4 text-[#2458CC]" />
             <span>Create Account</span>
